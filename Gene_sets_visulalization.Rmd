@@ -1,0 +1,175 @@
+---
+title: "Untitled"
+author: "Ashfaq Ali"
+date: "10/15/2020"
+output: html_document
+---
+
+
+## Gene/Protein annotations from biomaRt.
+
+```{r}
+library(biomaRt)
+ensembl = useMart("ensembl",dataset="mmusculus_gene_ensembl")
+filters = listFilters(ensembl)
+filters[1:10,]
+attributes = listAttributes(ensembl)
+attributes[1:15,]
+searchAttributes(mart = ensembl, pattern = "uniprot")
+
+genes <- geneID # this would correspond to gene ID from your data
+proteins <- proteinID  # this would correspond to protein ID from your data
+genes
+
+hgnc_symbol
+
+genes2 <-getBM(attributes=c('hgnc_symbol', 'entrezgene_id', 'description'), 
+      filters = 'external_gene_name ',  ## uniprotswissprot
+      values = genes, 
+      mart = ensembl
+        )
+select(ensembl)
+```
+
+### Load gene sets
+
+For mor details about the gene sets, please consult (https://www.gsea-msigdb.org/gsea/msigdb). 
+
+```{r}
+browseVignettes("clusterProfiler")
+```
+
+
+
+```{r, message=FALSE, warning=FALSE}
+library(msigdbr)
+library(clusterProfiler)
+
+m_df <- msigdbr(species = "Mus musculus") ## download the gene sets from msigdb
+
+hm_gsig <-m_df %>% filter(gs_cat=="H") %>% dplyr::select(gs_name, gene_symbol) # Hallmark genesets
+
+C5_gsig <-m_df %>% filter(gs_cat=="C5") %>% dplyr::select(gs_name, gene_symbol) # Go terms
+
+C2_gsig <-m_df %>% filter(gs_cat=="C2" & gs_subcat == "CP:KEGG") %>% dplyr::select(gs_name, gene_symbol) # Curated gene sets (Kegg pathways)
+C3_gsig <-m_df %>% filter(gs_cat=="C3" & gs_subcat == "TFT:GTRD") %>% dplyr::select(gs_name, gene_symbol) # Motifs (Trancription factor targets)
+C7_gsig <-m_df %>% filter(gs_cat=="C7") %>% dplyr::select(gs_name, gene_symbol) # C7 (immunologic signatures, 4872 gene sets)
+
+```
+
+### Gene Set Enrichment analyses
+
+```{r}
+Adhesion_geneset <- list()
+W1 <- AgeMain$logFC # Onne needs to provide that rank of the genes 
+
+names(W1)<- rownames(AgeMain)
+
+W1 <- sort((abs(W1)), decreasing = TRUE) 
+W1 <- W1[!duplicated(names(W1))]
+#mutate(rank = rank(log2FoldChange,  ties.method = "random")) 
+Ageing_Patways$Hallmark <-GSEA(W1, TERM2GENE = hm_gsig, exponent = 1, 
+                            #nPerm = 10000, 
+             pvalueCutoff = 0.2, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0) %>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated"), Description = stringr::str_replace_all(ID, c("HALLMARK_"= "", "_"=" ")))
+
+Ageing_Patways$kegg <-GSEA(W1, TERM2GENE = C2_gsig, exponent = 1, 
+                        #nPerm = 10000, 
+             pvalueCutoff = 0.2, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0) %>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated"), Description = stringr::str_replace_all(ID, c("KEGG_"= "", "_"=" ")))
+
+Ageing_Patways$Regulation <-GSEA(W1, TERM2GENE = C3_gsig, exponent = 1, 
+                              #nPerm = 10000, 
+                              pvalueCutoff = 0.2, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0) %>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated"))
+
+Ageing_Patways$GO <-GSEA(W1, TERM2GENE = C5_gsig, exponent = 1, 
+                      #nPerm = 10000,  
+                      pvalueCutoff = 0.2, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0) %>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated"), Description = stringr::str_replace_all(ID, c("GO_"= "", "_"=" ")))
+
+
+Ageing_Patways$Immunological <-GSEA(W1, TERM2GENE = C7_gsig, exponent = 1, 
+                                 #nPerm = 10000, 
+             pvalueCutoff = 0.2, minGSSize = 3, maxGSSize = 600,  verbose = FALSE, by="fgsea", eps = 0) %>% as.data.frame() %>% tibble() %>% mutate(enrichment= ifelse(NES > 0, "Up-regulated", "Down-regulated"))
+
+
+# ßwritexl::write_xlsx(Ageing_Patways, "../Results/Gene_sets.xlsx")
+
+  
+```
+
+
+
+_______________________________________
+##GO 
+
+```{r}
+gene <- names(geneList)[abs(geneList) > 2]
+gene.df <- bitr(gene, fromType = "ENTREZID",
+        toType = c("ENSEMBL", "SYMBOL"),
+        OrgDb = org.Hs.eg.db)
+head(gene.df)
+```
+
+
+```{r}
+ ggo <- groupGO(gene     = gene,
+               OrgDb    = org.Hs.eg.db,
+               ont      = "CC",
+               level    = 3,
+               readable = TRUE)
+
+head(ggo)
+```
+
+
+```{r}
+
+
+
+ego <- enrichGO(gene          = gene,
+                universe      = names(geneList),
+                OrgDb         = org.Hs.eg.db,
+                ont           = "CC",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05,
+        readable      = TRUE)
+head(ego)
+
+```
+
+```{r}
+ego2 <- enrichGO(gene         = gene.df$ENSEMBL,
+                OrgDb         = org.Hs.eg.db,
+                keyType       = 'ENSEMBL',
+                ont           = "CC",
+                pAdjustMethod = "BH",
+                pvalueCutoff  = 0.01,
+                qvalueCutoff  = 0.05)
+```
+
+
+```{r}
+ego2 <- setReadable(ego2, OrgDb = org.Hs.eg.db)
+```
+
+geneList contains three features:
+
+numeric vector: fold change or other type of numerical variable
+named vector: every number has a name, the corresponding gene ID
+sorted vector: number should be sorted in decreasing order
+If you import your data from a csv file, the file should contains two columns, one for gene ID (no duplicated ID allowed) and another one for fold change.
+
+```{r}
+
+
+
+
+ego3 <- gseGO(geneList     = geneList,
+              OrgDb        = org.Hs.eg.db,
+              ont          = "CC",
+              nPerm        = 1000,
+              minGSSize    = 100,
+              maxGSSize    = 500,
+              pvalueCutoff = 0.05,
+              verbose      = FALSE)
+```
+
